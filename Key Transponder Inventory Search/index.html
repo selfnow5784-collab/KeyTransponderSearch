@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Transponder Key Database</title>
+    <link rel="manifest" href="manifest.json" />
+    <script>
+        // Register Service Worker for PWA
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('service-worker.js')
+                    .then(reg => console.log("✅ Service Worker registered:", reg.scope))
+                    .catch(err => console.error("❌ Service Worker registration failed:", err));
+            });
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        /* Your original CSS (unchanged) */
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+
+        .tab-container {
+            display: flex;
+            background-color: #333;
+            border-bottom: 2px solid #333;
+            border-radius: 10px 10px 0 0;
+            overflow: hidden;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            cursor: pointer;
+            font-weight: bold;
+            color: hotpink;
+            background-color: black;
+            border-radius: 10px 10px 0 0;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .tab.active {
+            background-color: hotpink;
+            color: black;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 20px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background: #eee;
+        }
+
+        #saveButton {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: hotpink;
+            color: black;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 30px;
+            font-weight: bold;
+            box-shadow: 0px 2px 5px rgba(0,0,0,0.3);
+            cursor: pointer;
+            z-index: 1000;
+            display: none;
+        }
+
+        #searchInput, #editSearchInput {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        @media (max-width: 600px) {
+            .tab {
+                font-size: 14px;
+                padding: 10px;
+            }
+
+            th, td {
+                font-size: 12px;
+            }
+        }
+    </style>
+    <link rel="manifest" href="manifest.json" />
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", function () {
+          navigator.serviceWorker.register("service-worker.js").then(function (registration) {
+            console.log("✅ Service Worker registered:", registration.scope);
+          }).catch(function (error) {
+            console.error("❌ Service Worker registration failed:", error);
+          });
+        });
+      }
+    </script>
+</head>
+<body>
+    <div class="tab-container">
+        <div id="searchTab" class="tab active" onclick="switchTab('search')">Search</div>
+        <div id="editTab" class="tab" onclick="switchTab('edit')">Edit</div>
+    </div>
+
+    <div id="searchContent" class="tab-content active">
+        <input type="text" id="searchInput" placeholder="Search by any text..." oninput="performSearch()" />
+        <div id="searchResults"></div>
+    </div>
+
+    <div id="editContent" class="tab-content">
+        <input type="text" id="editSearchInput" placeholder="Search in table..." oninput="filterEditTable()" />
+        <table id="editTable"></table>
+        <button id="saveBtn" onclick="saveData()">Save</button>
+        <span id="saveStatus"></span>
+    </div>
+
+    <script>
+        console.log("Browser loaded, initializing Supabase...");
+
+        const supabaseUrl = "https://eojuneahiwcfvlegsirj.supabase.co";
+        const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVvanVuZWFoaXdjZnZsZWdzaXJqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI4MDUzNDMsImV4cCI6MjA2ODM4MTM0M30.ZTs_9km7hH_iaUyGT_r2pkvuWE_2O7jaLXkbdrPMjcA";
+        const bucketName = "transponderkeydatabase";
+        const fileName = "Key Transponder Inventory All - SearchAllData.csv";
+
+        const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+        let csvData = [];
+
+        function switchTab(tab) {
+            document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+            document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+            document.getElementById(tab + "Tab").classList.add("active");
+            document.getElementById(tab + "Content").classList.add("active");
+        }
+
+        async function loadCSV() {
+            try {
+                const { data, error } = await supabase
+                    .storage
+                    .from(bucketName)
+                    .download(fileName);
+
+                if (error) {
+                    console.error("❌ Error downloading file:", error.message);
+                    return;
+                }
+
+                const text = await data.text();
+                csvData = Papa.parse(text.trim(), { header: true }).data;
+                displayEditTable();
+            } catch (err) {
+                console.error("❌ Unexpected error:", err);
+            }
+        }
+
+        function displayEditTable() {
+            const table = document.getElementById("editTable");
+            table.innerHTML = "";
+
+            if (csvData.length === 0) {
+                table.innerHTML = "<tr><td>No data found.</td></tr>";
+                return;
+            }
+
+            const headers = Object.keys(csvData[0]);
+            let thead = "<tr>" + headers.map(h => `<th>${h}</th>`).join("") + "</tr>";
+            let tbody = csvData.map(row => {
+                return "<tr>" + headers.map(h => `<td contenteditable="true">${row[h] || ""}</td>`).join("") + "</tr>";
+            }).join("");
+            table.innerHTML = thead + tbody;
+        }
+
+        function performSearch() {
+            const query = document.getElementById("searchInput").value.toLowerCase();
+            const results = csvData.filter(row =>
+                Object.values(row).some(val => val && val.toLowerCase().includes(query))
+            );
+
+            const container = document.getElementById("searchResults");
+            if (results.length === 0) {
+                container.innerHTML = "<p>No results found.</p>";
+                return;
+            }
+
+            let table = "<table><tr>" + Object.keys(results[0]).map(h => `<th>${h}</th>`).join("") + "</tr>";
+            table += results.map(row =>
+                "<tr>" + Object.values(row).map(val => `<td>${val || ""}</td>`).join("") + "</tr>"
+            ).join("");
+            table += "</table>";
+            container.innerHTML = table;
+        }
+
+        function filterEditTable() {
+            const query = document.getElementById("editSearchInput").value.toLowerCase();
+            const filtered = csvData.filter(row =>
+                Object.values(row).some(val => val && val.toLowerCase().includes(query))
+            );
+            displayEditTable(filtered);
+        }
+
+        async function saveData() {
+            const rows = [...document.querySelectorAll("#editTable tr")];
+            const headers = rows.shift().querySelectorAll("th");
+            const dataToSave = rows.map(row => {
+                const cells = row.querySelectorAll("td");
+                let obj = {};
+                headers.forEach((h, i) => {
+                    obj[h.innerText] = cells[i].innerText;
+                });
+                return obj;
+            });
+
+            const csv = Papa.unparse(dataToSave);
+            const blob = new Blob([csv], { type: "text/csv" });
+
+            const { error } = await supabase
+                .storage
+                .from(bucketName)
+                .upload(fileName, blob, { upsert: true });
+
+            if (error) {
+                console.error("❌ Save error:", error.message);
+                document.getElementById("saveStatus").innerText = "Save failed!";
+            } else {
+                document.getElementById("saveStatus").innerText = "Saved!";
+                setTimeout(() => document.getElementById("saveStatus").innerText = "", 2000);
+            }
+        }
+
+        window.onload = loadCSV;
+    </script>
+</body>
+</html>
